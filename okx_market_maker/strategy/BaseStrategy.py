@@ -32,6 +32,12 @@ from okx_market_maker.market_data_service.RESTMarketDataService import RESTMarke
 from okx_market_maker.utils.OkxEnum import AccountConfigMode, TdMode, InstType
 from okx_market_maker.utils.TdModeUtil import TdModeUtil
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(module)s - %(funcName)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 class BaseStrategy(ABC):
     trade_api: TradeAPI
@@ -51,17 +57,17 @@ class BaseStrategy(ABC):
         self.account_api = AccountAPI(api_key=api_key, api_secret_key=api_key_secret, passphrase=api_passphrase,
                                       flag='0' if not is_paper_trading else '1', debug=False)
         self.mds = WssMarketDataService(
-            url="wss://ws.okx.com:8443/ws/v5/public?brokerId=9999" if is_paper_trading
+            url="wss://ws.okx.com:8443/ws/v5/public" if is_paper_trading
             else "wss://ws.okx.com:8443/ws/v5/public",
             inst_id=TRADING_INSTRUMENT_ID,
             channel="books"
         )
         self.rest_mds = RESTMarketDataService(is_paper_trading)
         self.oms = WssOrderManagementService(
-            url="wss://ws.okx.com:8443/ws/v5/private?brokerId=9999" if is_paper_trading
+            url="wss://wspap.okx.com:8443/ws/v5/private" if is_paper_trading
             else "wss://ws.okx.com:8443/ws/v5/private")
         self.pms = WssPositionManagementService(
-            url="wss://ws.okx.com:8443/ws/v5/private?brokerId=9999" if is_paper_trading
+            url="wss://wspap.okx.com:8443/ws/v5/private" if is_paper_trading
             else "wss://ws.okx.com:8443/ws/v5/private")
         self._strategy_order_dict = dict()
         self.params_loader = ParamsLoader()
@@ -380,17 +386,18 @@ class BaseStrategy(ABC):
 
     def _set_account_config(self):
         account_config = self.account_api.get_account_config()
+        logger.info(f"account config:{account_config}")
         if account_config.get("code") == '0':
             self._account_mode = AccountConfigMode(int(account_config.get("data")[0]['acctLv']))
 
-    def _run_exchange_connection(self):
-        self.mds.start()
-        self.oms.start()
-        self.pms.start()
+    async def _run_exchange_connection(self):
+        await self.mds.start()
+        await self.oms.start()
+        await self.pms.start()
         self.rest_mds.start()
-        self.mds.run_service()
-        self.oms.run_service()
-        self.pms.run_service()
+        await self.mds.run_service()
+        await self.oms.run_service()
+        await self.pms.run_service()
 
     def trading_instrument_type(self) -> InstType:
         guessed_inst_type = InstrumentUtil.get_inst_type_from_inst_id(TRADING_INSTRUMENT_ID)
@@ -411,13 +418,13 @@ class BaseStrategy(ABC):
         self._strategy_measurement = StrategyMeasurement(trading_instrument=trading_instrument,
                                                          trading_instrument_type=trading_instrument_type)
 
-    def run(self):
+    async def run(self):
         self._set_account_config()
         self.trading_instrument_type = self.trading_instrument_type()
         InstrumentUtil.get_instrument(TRADING_INSTRUMENT_ID, self.trading_instrument_type)
         self.set_strategy_measurement(trading_instrument=TRADING_INSTRUMENT_ID,
                                       trading_instrument_type=self.trading_instrument_type)
-        self._run_exchange_connection()
+        await self._run_exchange_connection()
         while 1:
             try:
                 exchange_normal = self.check_status()

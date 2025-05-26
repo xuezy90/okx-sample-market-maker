@@ -1,25 +1,35 @@
+import asyncio
 import json
+import logging
 import time
 from typing import List, Dict
 
 from okx_market_maker.order_management_service.model.Order import Order, Orders
-from okx.websocket.WsPrivate import WsPrivate
+from okx.websocket.WsPrivateAsync import WsPrivateAsync
 from okx_market_maker import orders_container
 from okx_market_maker.settings import API_KEY, API_KEY_SECRET, API_PASSPHRASE
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(module)s - %(funcName)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
-class WssOrderManagementService(WsPrivate):
+class WssOrderManagementService(WsPrivateAsync):
     def __init__(self, url: str, api_key: str = API_KEY, passphrase: str = API_PASSPHRASE,
                  secret_key: str = API_KEY_SECRET, useServerTime: bool = False):
         super().__init__(api_key, passphrase, secret_key, url, useServerTime)
         self.args = []
 
-    def run_service(self):
+    async def run_service(self):
+        logger.info("process in run_service...")
         args = self._prepare_args()
-        print(args)
-        print("subscribing")
+        logger.info(args)
         orders_container.append(Orders())
-        self.subscribe(args, _callback)
+        logger.info(f"subscribe args: {args}")
+        logger.info(f"orders_container: {orders_container}")
+        await self.subscribe(args, _callback)
         self.args += args
 
     def stop_service(self):
@@ -38,13 +48,16 @@ class WssOrderManagementService(WsPrivate):
 
 
 def _callback(message):
-    arg = message.get("arg")
-    # print(message)
-    if not arg or not arg.get("channel"):
+    logger.info(message)
+    data = json.loads(message)
+    if 'arg' not in data:
         return
-    if message.get("event") == "subscribe":
+    arg = data['arg']
+    if not arg or not arg['channel']:
         return
-    if arg.get("channel") == "orders":
+    if data['event'] == "subscribe":
+        return
+    if arg['channel'] == "orders":
         on_orders_update(message)
         # print(orders_container)
 
@@ -60,6 +73,6 @@ if __name__ == "__main__":
     # url = "wss://ws.okx.com:8443/ws/v5/private"
     url = "wss://ws.okx.com:8443/ws/v5/private?brokerId=9999"
     order_management_service = WssOrderManagementService(url=url)
-    order_management_service.start()
-    order_management_service.run_service()
+    asyncio.run(order_management_service.start())
+    asyncio.run(order_management_service.run_service())
     time.sleep(30)

@@ -48,4 +48,4 @@ class RESTMarketDataService(threading.Thread):
 
 if __name__ == "__main__":
     rest_mds = RESTMarketDataService()
-    rest_mds.start()
+    rest_mds.run()

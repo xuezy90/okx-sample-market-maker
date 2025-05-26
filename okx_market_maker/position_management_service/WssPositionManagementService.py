@@ -1,3 +1,6 @@
+import asyncio
+import json
+import logging
 import time
 from typing import List, Dict
 import copy
@@ -6,33 +9,39 @@ from okx_market_maker.position_management_service.model.BalanceAndPosition impor
     BalanceData, PosData
 from okx_market_maker.position_management_service.model.Account import Account, AccountDetail
 from okx_market_maker.position_management_service.model.Positions import Position, Positions
-from okx.websocket.WsPrivate import WsPrivate
+from okx.websocket.WsPrivateAsync import WsPrivateAsync
 from okx_market_maker import balance_and_position_container, account_container, positions_container
 from okx_market_maker.settings import API_KEY, API_KEY_SECRET, API_PASSPHRASE
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(module)s - %(funcName)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
-class WssPositionManagementService(WsPrivate):
+class WssPositionManagementService(WsPrivateAsync):
     def __init__(self, url: str, api_key: str = API_KEY, passphrase: str = API_PASSPHRASE,
                  secret_key: str = API_KEY_SECRET, useServerTime: bool = False):
         super().__init__(api_key, passphrase, secret_key, url, useServerTime)
         self.args = []
 
-    def run_service(self):
+    async def run_service(self):
         args = self._prepare_args()
-        print(args)
-        print("subscribing")
-        self.subscribe(args, _callback)
+        logger.info(f"position subscribe args: {args}")
+        logger.info("position management subscribing ...")
+        await self.subscribe(args, _callback)
         self.args += args
 
     def stop_service(self):
-        self.unsubscribe(self.args, lambda message: print(message))
+        self.unsubscribe(self.args, lambda message: logger.info(message))
         self.close()
 
     @staticmethod
     def _prepare_args() -> List[Dict]:
         args = []
         account_sub = {
-                "channel": "account"
+            "channel": "account"
         }
         args.append(account_sub)
         positions_sub = {
@@ -48,23 +57,27 @@ class WssPositionManagementService(WsPrivate):
 
 
 def _callback(message):
-    arg = message.get("arg")
-    # print(message)
-    if not arg or not arg.get("channel"):
+    logger.info(message)
+    data = json.loads(message)
+    if 'arg' not in data:
         return
-    if message.get("event") == "subscribe":
+    arg = data['arg']
+    if not arg or not arg['channel']:
         return
-    if arg.get("channel") == "balance_and_position":
+    if data['event'] == "subscribe":
+        return
+    if arg['channel'] == "balance_and_position":
+        logger.info(f"balance and position result:{message}")
         on_balance_and_position(message)
-        # print(balance_and_position_container)
-    if arg.get("channel") == "account":
-        # print(message)
+        logger.info(f"balance and position container:{balance_and_position_container}")
+    if arg['channel'] == "account":
+        logger.info(f"account result:{message}")
         on_account(message)
-        # print(account_container)
-    if arg.get("channel") == "positions":
-        # print(message)
+        logger.info(f"account container:{account_container}")
+    if arg['channel'] == "positions":
+        logger.info(f"positions result:{message}")
         on_position(message)
-        # print(positions_container)
+        logger.info(f"positions container:{positions_container}")
 
 
 def on_balance_and_position(message):
@@ -91,6 +104,6 @@ def on_position(message):
 if __name__ == "__main__":
     url = "wss://ws.okx.com:8443/ws/v5/private"
     position_management_service = WssPositionManagementService(url=url)
-    position_management_service.start()
-    position_management_service.run_service()
+    asyncio.run(position_management_service.start())
+    asyncio.run(position_management_service.run_service())
     time.sleep(30)
