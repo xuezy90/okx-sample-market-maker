@@ -1,4 +1,3 @@
-import logging
 import threading
 import time
 import traceback
@@ -10,8 +9,12 @@ from okx_market_maker.market_data_service.model.MarkPx import MarkPxCache
 from okx_market_maker.settings import IS_PAPER_TRADING
 from okx_market_maker import tickers_container, mark_px_container
 from okx_market_maker.market_data_service.model.Tickers import Tickers
+from okx_market_maker.utils.LogFileEnum import LogFileEnum
+from okx_market_maker.utils.LogUtil import LogUtil
 from okx_market_maker.utils.OkxEnum import InstType
 
+# 创建logger
+logger = LogUtil(LogFileEnum.MARKET).get_logger()
 
 class RESTMarketDataService(threading.Thread):
     def __init__(self, is_paper_trading=IS_PAPER_TRADING):
@@ -42,7 +45,7 @@ class RESTMarketDataService(threading.Thread):
             except KeyboardInterrupt:
                 break
             except (OkxAPIException, OkxParamsException, OkxRequestException):
-                logging.warning(traceback.format_exc())
+                logger.warning(traceback.format_exc())
                 time.sleep(10)
 
 

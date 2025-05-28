@@ -5,8 +5,12 @@ from decimal import Decimal
 from okx_market_maker.market_data_service.model.Tickers import Tickers
 from okx_market_maker.strategy.risk.RiskSnapshot import RiskSnapShot, AssetValueInst
 from okx_market_maker.utils.InstrumentUtil import InstrumentUtil
+from okx_market_maker.utils.LogFileEnum import LogFileEnum
+from okx_market_maker.utils.LogUtil import LogUtil
 from okx_market_maker.utils.OkxEnum import InstType, CtType
 from okx_market_maker import tickers_container, mark_px_container, order_books
+
+logger = LogUtil(LogFileEnum.STRATEGY).get_logger()
 
 
 @dataclass
@@ -114,13 +118,13 @@ class StrategyMeasurement:
         if instrument.inst_type in [InstType.SWAP, InstType.FUTURES]:
             if instrument.ct_type == CtType.LINEAR:
                 return asset_value_inst.pos * instrument.ct_mul * instrument.ct_val \
-                       * (current_mark_px - asset_value_inst.avg_px) + asset_value_inst.margin
+                    * (current_mark_px - asset_value_inst.avg_px) + asset_value_inst.margin
             if instrument.ct_type == CtType.INVERSE:
                 return asset_value_inst.pos * instrument.ct_mul * instrument.ct_val \
-                       * (1 / asset_value_inst.avg_px - 1 / current_mark_px) + asset_value_inst.margin
+                    * (1 / asset_value_inst.avg_px - 1 / current_mark_px) + asset_value_inst.margin
         if instrument.inst_type in [InstType.OPTION]:
             return asset_value_inst.pos * instrument.ct_mul * instrument.ct_val \
-                   * current_mark_px + asset_value_inst.margin
+                * current_mark_px + asset_value_inst.margin
         return 0.0
 
     def consume_risk_snapshot(self, risk_snapshot: RiskSnapShot):
@@ -161,14 +165,14 @@ class StrategyMeasurement:
             self._current_risk_snapshot.timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
         init_time_string = datetime.datetime.fromtimestamp(
             self._inception_risk_snapshot.timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"==== Risk Summary ====\n"
-              f"Time: {curr_time_string}\n"
-              f"Inception: {init_time_string}\n"
-              f"P&L since inception (USD): {self.pnl_in_usd_since_running:.2f}\n"
-              f"Asset Value Change since inception (USD): {self.asset_value_change_in_usd_since_running:.2f}\n"
-              f"Trading Instrument: {self.trading_instrument} ({self.trading_instrument_type.value})\n"
-              f"Trading Instrument Exposure ({self.trading_inst_exposure_ccy}): "
-              f"{self.trading_instrument_exposure_in_base:.4f}\n"
-              f"Trading Instrument Exposure ({self.trading_inst_quote_ccy}): "
-              f"{self.trading_instrument_exposure_in_quote:.2f}\nNet Traded Position: {self.net_filled_qty}\n"
-              f"Net Trading Volume: {self.trading_volume}\n==== End of Summary ====")
+        logger.info(f"==== Risk Summary ====\n"
+                    f"Time: {curr_time_string}\n"
+                    f"Inception: {init_time_string}\n"
+                    f"P&L since inception (USD): {self.pnl_in_usd_since_running:.2f}\n"
+                    f"Asset Value Change since inception (USD): {self.asset_value_change_in_usd_since_running:.2f}\n"
+                    f"Trading Instrument: {self.trading_instrument} ({self.trading_instrument_type.value})\n"
+                    f"Trading Instrument Exposure ({self.trading_inst_exposure_ccy}): "
+                    f"{self.trading_instrument_exposure_in_base:.4f}\n"
+                    f"Trading Instrument Exposure ({self.trading_inst_quote_ccy}): "
+                    f"{self.trading_instrument_exposure_in_quote:.2f}\nNet Traded Position: {self.net_filled_qty}\n"
+                    f"Net Trading Volume: {self.trading_volume}\n==== End of Summary ====")

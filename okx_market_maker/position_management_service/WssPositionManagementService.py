@@ -2,8 +2,8 @@ import asyncio
 import json
 import logging
 import time
+from logging import DEBUG
 from typing import List, Dict
-import copy
 
 from okx_market_maker.position_management_service.model.BalanceAndPosition import BalanceAndPosition, \
     BalanceData, PosData
@@ -12,13 +12,12 @@ from okx_market_maker.position_management_service.model.Positions import Positio
 from okx.websocket.WsPrivateAsync import WsPrivateAsync
 from okx_market_maker import balance_and_position_container, account_container, positions_container
 from okx_market_maker.settings import API_KEY, API_KEY_SECRET, API_PASSPHRASE
+from okx_market_maker.utils.LogFileEnum import LogFileEnum
+from okx_market_maker.utils.LogUtil import LogUtil
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-console_handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(module)s - %(funcName)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+# 创建logger
+logger = LogUtil(LogFileEnum.POSITION).get_logger()
+
 
 class WssPositionManagementService(WsPrivateAsync):
     def __init__(self, url: str, api_key: str = API_KEY, passphrase: str = API_PASSPHRASE,
@@ -26,11 +25,17 @@ class WssPositionManagementService(WsPrivateAsync):
         super().__init__(api_key, passphrase, secret_key, url, useServerTime)
         self.args = []
 
+    # async def start(self):
+    #     logger.info("Connecting to WebSocket...")
+    #     await self.connect()
+
     async def run_service(self):
+        logger.info("position management subscribing ...")
+        await self.start()
         args = self._prepare_args()
         logger.info(f"position subscribe args: {args}")
-        logger.info("position management subscribing ...")
         await self.subscribe(args, _callback)
+        # await self.consume()
         self.args += args
 
     def stop_service(self):
@@ -46,7 +51,6 @@ class WssPositionManagementService(WsPrivateAsync):
         args.append(account_sub)
         positions_sub = {
             "channel": "positions",
-            "instType": "ANY"
         }
         args.append(positions_sub)
         balance_and_position_sub = {
@@ -58,33 +62,31 @@ class WssPositionManagementService(WsPrivateAsync):
 
 def _callback(message):
     logger.info(message)
-    data = json.loads(message)
-    if 'arg' not in data:
+    msgJson = json.loads(message)
+    if 'arg' not in msgJson:
         return
-    arg = data['arg']
+    arg = msgJson['arg']
     if not arg or not arg['channel']:
         return
-    if data['event'] == "subscribe":
+    if 'data' not in msgJson:
         return
+    if not msgJson['data']:
+        return
+    # if not msgJson['event'] or msgJson['event'] == "subscribe":
+    #     return
     if arg['channel'] == "balance_and_position":
-        logger.info(f"balance and position result:{message}")
-        on_balance_and_position(message)
-        logger.info(f"balance and position container:{balance_and_position_container}")
+        on_balance_and_position(msgJson)
     if arg['channel'] == "account":
-        logger.info(f"account result:{message}")
-        on_account(message)
-        logger.info(f"account container:{account_container}")
+        on_account(msgJson)
     if arg['channel'] == "positions":
-        logger.info(f"positions result:{message}")
-        on_position(message)
-        logger.info(f"positions container:{positions_container}")
-
+        on_position(msgJson)
 
 def on_balance_and_position(message):
     if not balance_and_position_container:
         balance_and_position_container.append(BalanceAndPosition.init_from_json(message))
     else:
         balance_and_position_container[0].update_from_json(message)
+    logger.info(f"show balance_and_position_container:{balance_and_position_container}")
 
 
 def on_account(message):
@@ -92,6 +94,7 @@ def on_account(message):
         account_container.append(Account.init_from_json(message))
     else:
         account_container[0].update_from_json(message)
+    logger.info(f"show account_container:{account_container}")
 
 
 def on_position(message):
@@ -99,11 +102,12 @@ def on_position(message):
         positions_container.append(Positions.init_from_json(message))
     else:
         positions_container[0].update_from_json(message)
+    logger.info(f"show positions_container:{positions_container}")
 
 
 if __name__ == "__main__":
-    url = "wss://ws.okx.com:8443/ws/v5/private"
-    position_management_service = WssPositionManagementService(url=url)
+    uri = "wss://wspap.okx.com:8443/ws/v5/private"
+    position_management_service = WssPositionManagementService(url=uri)
     asyncio.run(position_management_service.start())
     asyncio.run(position_management_service.run_service())
     time.sleep(30)

@@ -1,6 +1,4 @@
-import asyncio
 import json
-import logging
 import os
 import threading
 import time
@@ -11,34 +9,11 @@ from okx_market_maker import order_books
 from okx_market_maker.market_data_service.model.OrderBook import OrderBook, OrderBookLevel
 from okx.websocket.WsPublicAsync import WsPublicAsync
 
-# 获取项目根目录
-project_dir = os.path.dirname(os.path.dirname(__file__))
-# 配置日志文件路径
-current_file_path = os.path.join(project_dir, 'logs', 'market-date-service.log')
-# os.makedirs(current_file_path, exist_ok=True)
+from okx_market_maker.utils.LogFileEnum import LogFileEnum
+from okx_market_maker.utils.LogUtil import LogUtil
 
-logger = logging.getLogger(__name__)
-defaultLogger = logging.getLogger()
-
-# 创建当前类日志文件的Handler
-current_class_file_handler = logging.FileHandler(current_file_path)
-current_class_file_handler.setLevel(logging.INFO)
-# 创建第三方包日志文件的Handler
-third_party_file_handler = logging.FileHandler('default.log')
-third_party_file_handler.setLevel(logging.INFO)
-#创建控制台handler
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-
-formatter = logging.Formatter('%(asctime)s - %(module)s - %(funcName)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-third_party_file_handler.setFormatter(formatter)
-current_class_file_handler.setFormatter(formatter)
-
-logger.addHandler(console_handler)
-# logger.addHandler(current_class_file_handler)
-# defaultLogger.addHandler(third_party_file_handler)
-
+# 创建logger
+logger = LogUtil(LogFileEnum.MARKET).get_logger()
 
 class WssMarketDataService(WsPublicAsync):
     def __init__(self, url, inst_id, channel="books5"):
@@ -48,52 +23,18 @@ class WssMarketDataService(WsPublicAsync):
         order_books[self.inst_id] = OrderBook(inst_id=inst_id)
         self.args = []
 
-    # async def subscribe(self, params: list, callback):
-    #     print("process in subscribing...")
-    #     self.callback = callback
-    #     payload = json.dumps({
-    #         "op": "subscribe",
-    #         "args": params
-    #     })
-    #     await self.websocket.send(payload)
-    #     print(f"websocket info:{self.websocket}")
-    #     self.loop.create_task(self.consume())
-    #
-    # async def consume(self):
-    #     print("process in consuming...")
-    #     async for message in self.websocket:
-    #         print("Received message: {%s}", message)
-    #         _callback(message)
-    #
     # async def start(self):
-    #     print("process in starting...")
+    #     logger.info("Connecting to WebSocket...")
     #     await self.connect()
-    #     print(f"socketId:{self.websocket.id}===socketState:{self.websocket.state}")
 
     async def run_service(self):
         logger.info("process in run_service...")
+        await self.start()
         args = self._prepare_args()
         logger.info(f"subscribe args: {args}")
         await self.subscribe(args, _callback)
+        # await self.consume()
         self.args += args
-
-    # async def okx_websocket_sub(self):
-    #     async with websockets.connect(self.url) as websocket:
-    #         # 订阅BTC-USDT的实时交易数据（trade频道）
-    #         subscribe_msg = {
-    #             "op": "subscribe",
-    #             "args": [{"channel": self.channel, "instId": self.inst_id}]
-    #         }
-    #         await websocket.send(json.dumps(subscribe_msg))
-    #         print(subscribe_msg)
-    #         while True:
-    #             try:
-    #                 # 持续接收数据
-    #                 async for message in websocket:
-    #                     _callback(message)
-    #             except websockets.exceptions.ConnectionClosedError:
-    #                 print("WebSocket连接已关闭")
-    #                 break
 
     def stop_service(self):
         self.unsubscribe(self.args, lambda message: logger.info(message))
@@ -111,16 +52,18 @@ class WssMarketDataService(WsPublicAsync):
 
 def _callback(message):
     logger.info(message)
-    data = json.loads(message)
-    arg = data['arg']
+    msgJson = json.loads(message)
+    if 'arg' not in msgJson:
+        return
+    arg = msgJson['arg']
     if not arg or not arg['channel']:
         return
-    if 'event' in data:  # 忽略心跳响应
+    if 'data' not in msgJson:
         return
-    if arg['channel'] in ["tickers"]:
-        on_ticker_data(data['data'])
+    if not msgJson['data']:
+        return
     if arg['channel'] in ["books5", "books", "bbo-tbt", "books50-l2-tbt", "books-l2-tbt"]:
-        on_orderbook_snapshot_or_update(data)
+        on_orderbook_snapshot_or_update(msgJson)
         # print(order_books)
 
 
@@ -133,7 +76,7 @@ def on_ticker_data(data):
     okx_bid_px = ticker['bidPx']
     okx_ask_px = ticker['askPx']
 
-    print(f"""
+    logger.info(f"""
             [{okx_date_time}]
                     交易对: {okx_inst_id}
                     最新价: {okx_current_price}
@@ -255,12 +198,19 @@ class ChecksumThread(threading.Thread):
 
 
 if __name__ == "__main__":
-    # url = "wss://ws.okx.com:8443/ws/v5/public"
-    url = "wss://ws.okx.com:8443/ws/v5/public"
-    market_data_service = WssMarketDataService(url=url, inst_id="BTC-USDT", channel="books")
-    asyncio.run(market_data_service.start())
-    asyncio.run(market_data_service.run_service())
-    # asyncio.run(market_data_service.okx_websocket_sub())
-    # asyncio.run(market_data_service.consume())
-    check_sum = ChecksumThread(market_data_service)
-    check_sum.start()
+    # # url = "wss://ws.okx.com:8443/ws/v5/public"
+    # url = "wss://wspap.okx.com:8443/ws/v5/public"
+    # market_data_service = WssMarketDataService(url=url, inst_id="BTC-USDT", channel="books")
+    # asyncio.run(market_data_service.start())
+    # asyncio.run(market_data_service.run_service())
+    # # asyncio.run(market_data_service.okx_websocket_sub())
+    # # asyncio.run(market_data_service.consume())
+    # check_sum = ChecksumThread(market_data_service)
+    # check_sum.start()
+    logger.info("test........")
+    logger.info(__name__)
+    logger.info(__file__)
+    logger.info(__package__)
+    logger.info(os.path.dirname(os.path.dirname(__file__)))
+
+

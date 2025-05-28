@@ -1,9 +1,9 @@
+import asyncio
 import time
 import traceback
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import List, Dict, Tuple
-import logging
 from copy import deepcopy
 
 from okx.Status import StatusAPI
@@ -18,7 +18,7 @@ from okx.Trade import TradeAPI
 from okx.Account import AccountAPI
 from okx_market_maker.settings import *
 from okx_market_maker import orders_container, order_books, account_container, positions_container, tickers_container, \
-    mark_px_container
+    mark_px_container, balance_and_position_container
 from okx_market_maker.strategy.model.StrategyOrder import StrategyOrder, StrategyOrderStatus
 from okx_market_maker.strategy.model.StrategyMeasurement import StrategyMeasurement
 from okx_market_maker.market_data_service.model.OrderBook import OrderBook
@@ -29,15 +29,14 @@ from okx_market_maker.market_data_service.WssMarketDataService import WssMarketD
 from okx_market_maker.order_management_service.WssOrderManagementService import WssOrderManagementService
 from okx_market_maker.position_management_service.WssPositionManagementService import WssPositionManagementService
 from okx_market_maker.market_data_service.RESTMarketDataService import RESTMarketDataService
+from okx_market_maker.utils.LogFileEnum import LogFileEnum
+from okx_market_maker.utils.LogUtil import LogUtil
 from okx_market_maker.utils.OkxEnum import AccountConfigMode, TdMode, InstType
 from okx_market_maker.utils.TdModeUtil import TdModeUtil
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-console_handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(module)s - %(funcName)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+# 创建logger
+logger = LogUtil(LogFileEnum.STRATEGY).get_logger()
+
 
 class BaseStrategy(ABC):
     trade_api: TradeAPI
@@ -119,8 +118,9 @@ class BaseStrategy(ABC):
             )
             self._strategy_order_dict[order_request.client_order_id] = strategy_order
             order_data_list.append(order_request.to_dict())
-            print(f"PLACE ORDER {order_request.ord_type.value} {order_request.side.value} {order_request.inst_id} "
-                  f"{order_request.size} @ {order_request.price}")
+            logger.info(
+                f"PLACE ORDER {order_request.ord_type.value} {order_request.side.value} {order_request.inst_id} "
+                f"{order_request.size} @ {order_request.price}")
             if len(order_data_list) >= 20:
                 self._place_orders(order_data_list)
                 order_data_list = []
@@ -136,7 +136,7 @@ class BaseStrategy(ABC):
         :return: None
         """
         result = self.trade_api.place_multiple_orders(order_data_list)
-        print(result)
+        logger.info(result)
         time.sleep(2)
         if result["code"] == '1':
             for order_data in order_data_list:
@@ -174,8 +174,9 @@ class BaseStrategy(ABC):
                 strategy_order.price = order_request.new_price
             strategy_order.amend_req_id = order_request.req_id
             strategy_order.strategy_order_status = StrategyOrderStatus.AMD_SENT
-            print(f"AMEND ORDER {order_request.client_order_id} with new size {order_request.new_size} or new price "
-                  f"{order_request.new_price}, req_id is {order_request.req_id}")
+            logger.info(
+                f"AMEND ORDER {order_request.client_order_id} with new size {order_request.new_size} or new price "
+                f"{order_request.new_price}, req_id is {order_request.req_id}")
             order_data_list.append(order_request.to_dict())
             if len(order_data_list) >= 20:
                 self._amend_orders(order_data_list)
@@ -214,7 +215,7 @@ class BaseStrategy(ABC):
                 continue
             strategy_order = self._strategy_order_dict[client_order_id]
             strategy_order.strategy_order_status = StrategyOrderStatus.CXL_SENT
-            print(f"CANCELING ORDER {order_request.client_order_id}")
+            logger.info(f"CANCELING ORDER {order_request.client_order_id}")
             order_data_list.append(order_request.to_dict())
             if len(order_data_list) >= 20:
                 self._cancel_orders(order_data_list)
@@ -309,13 +310,13 @@ class BaseStrategy(ABC):
             order_book: OrderBook = self.get_order_book()
         except ValueError:
             return False
-        order_book_delay = time.time() - order_book.timestamp / 1000
+        order_book_delay = (time.time() - order_book.timestamp) / 1000
         if order_book_delay > ORDER_BOOK_DELAYED_SEC:
-            logging.warning(f"{TRADING_INSTRUMENT_ID} delayed in order books cache for {order_book_delay:.2f} seconds!")
+            logger.warning(f"{TRADING_INSTRUMENT_ID} delayed in order books cache for {order_book_delay:.2f} seconds!")
             return False
         check_sum_result: bool = order_book.do_check_sum()
         if not check_sum_result:
-            logging.warning(f"{TRADING_INSTRUMENT_ID} orderbook checksum failed, re-subscribe MDS!")
+            logger.warning(f"{TRADING_INSTRUMENT_ID} orderbook checksum failed, re-subscribe MDS!")
             self.mds.stop_service()
             self.mds.run_service()
             return False
@@ -325,7 +326,7 @@ class BaseStrategy(ABC):
             return False
         account_delay = time.time() - account.u_time / 1000
         if account_delay > ACCOUNT_DELAYED_SEC:
-            logging.warning(f"Account info delayed in accounts cache for {account_delay:.2f} seconds!")
+            logger.warning(f"Account info delayed in accounts cache for {account_delay:.2f} seconds!")
             return False
         return True
 
@@ -361,7 +362,7 @@ class BaseStrategy(ABC):
 
         orders_cache.remove_orders(order_to_remove_from_cache)
         if order_not_found_in_cache:
-            logging.warning(f"Strategy Orders not found in order cache: {order_not_found_in_cache}")
+            logger.warning(f"Strategy Orders not found in order cache: {order_not_found_in_cache}")
 
     def get_params(self):
         self.params_loader.load_params()
@@ -380,7 +381,7 @@ class BaseStrategy(ABC):
     def check_status(self):
         status_response = self.status_api.status("ongoing")
         if status_response.get("data"):
-            print(status_response.get("data"))
+            logger.info(status_response.get("data"))
             return False
         return True
 
@@ -391,13 +392,20 @@ class BaseStrategy(ABC):
             self._account_mode = AccountConfigMode(int(account_config.get("data")[0]['acctLv']))
 
     async def _run_exchange_connection(self):
-        await self.mds.start()
-        await self.oms.start()
-        await self.pms.start()
         self.rest_mds.start()
+        # await self.mds.run_service()
         await self.mds.run_service()
         await self.oms.run_service()
         await self.pms.run_service()
+        while not positions_container or len(positions_container) == 0:
+            await asyncio.sleep(5)
+            logger.info(f"account_container:{len(account_container)}")
+            logger.info(f"positions_container:{len(positions_container)}")
+            logger.info(f"balance_and_position_container:{len(balance_and_position_container)}")
+            logger.info(f"tickers_container:{len(tickers_container)}")
+            logger.info(f"mark_px_container:{len(mark_px_container)}")
+        else:
+            logger.info("All Infos Ready!")
 
     def trading_instrument_type(self) -> InstType:
         guessed_inst_type = InstrumentUtil.get_inst_type_from_inst_id(TRADING_INSTRUMENT_ID)
@@ -434,15 +442,15 @@ class BaseStrategy(ABC):
                 result = self._health_check()
                 self.risk_summary()
                 if not result:
-                    print(f"Health Check result is {result}")
+                    logger.info(f"Health Check result is {result}")
                     time.sleep(5)
                     continue
                 # summary
                 self._update_strategy_order_status()
                 place_order_list, amend_order_list, cancel_order_list = self.order_operation_decision()
-                # print(place_order_list)
-                # print(amend_order_list)
-                # print(cancel_order_list)
+                logger.info(place_order_list)
+                logger.info(amend_order_list)
+                logger.info(cancel_order_list)
 
                 self.place_orders(place_order_list)
                 self.amend_orders(amend_order_list)
@@ -450,9 +458,9 @@ class BaseStrategy(ABC):
 
                 time.sleep(1)
             except:
-                print(traceback.format_exc())
+                logger.error(traceback.format_exc())
                 try:
                     self.cancel_all()
                 except:
-                    print(f"Failed to cancel orders: {traceback.format_exc()}")
+                    logger.error(f"Failed to cancel orders: {traceback.format_exc()}")
                 time.sleep(20)
