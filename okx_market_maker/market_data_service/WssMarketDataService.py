@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import threading
@@ -5,7 +6,7 @@ import time
 from datetime import datetime
 from typing import Dict, List
 
-from okx_market_maker import order_books
+from okx_market_maker import order_books, wait_consume_second
 from okx_market_maker.market_data_service.model.OrderBook import OrderBook, OrderBookLevel
 from okx.websocket.WsPublicAsync import WsPublicAsync
 
@@ -35,6 +36,7 @@ class WssMarketDataService(WsPublicAsync):
         await self.subscribe(args, _callback)
         # await self.consume()
         self.args += args
+        await asyncio.sleep(wait_consume_second)
 
     def stop_service(self):
         self.unsubscribe(self.args, lambda message: logger.info(message))
@@ -51,7 +53,7 @@ class WssMarketDataService(WsPublicAsync):
 
 
 def _callback(message):
-    logger.info(message)
+    logger.debug(message)
     msgJson = json.loads(message)
     if 'arg' not in msgJson:
         return
@@ -65,26 +67,6 @@ def _callback(message):
     if arg['channel'] in ["books5", "books", "bbo-tbt", "books50-l2-tbt", "books-l2-tbt"]:
         on_orderbook_snapshot_or_update(msgJson)
         # print(order_books)
-
-
-def on_ticker_data(data):
-    ticker = data[0]
-    okx_date_time = datetime.fromtimestamp((int)(ticker['ts']) / 1000)
-    okx_inst_id = ticker['instId']
-    okx_current_price = ticker['last']
-    okx_24_vol = ticker['vol24h']
-    okx_bid_px = ticker['bidPx']
-    okx_ask_px = ticker['askPx']
-
-    logger.info(f"""
-            [{okx_date_time}]
-                    交易对: {okx_inst_id}
-                    最新价: {okx_current_price}
-                    24小时成交量: {okx_24_vol}
-                    买一价: {okx_bid_px}
-                    卖一价: {okx_ask_px}
-                    """)
-
 
 def on_orderbook_snapshot_or_update(message):
     """

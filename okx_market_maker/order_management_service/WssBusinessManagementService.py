@@ -13,11 +13,13 @@ from okx_market_maker.utils.LogUtil import LogUtil
 # 创建logger
 logger = LogUtil(LogFileEnum.ORDER).get_logger()
 
-class WssOrderManagementService(WsPrivateAsync):
+
+class WssBusinessManagementService(WsPrivateAsync):
     def __init__(self, url: str, api_key: str = API_KEY, passphrase: str = API_PASSPHRASE,
                  secret_key: str = API_KEY_SECRET, useServerTime: bool = False):
         super().__init__(api_key, passphrase, secret_key, url, useServerTime)
         self.args = []
+
     # async def start(self):
     #     logger.info("Connecting to WebSocket...")
     #     await self.connect()
@@ -28,7 +30,6 @@ class WssOrderManagementService(WsPrivateAsync):
         await self.start()
         args = self._prepare_args()
         logger.info(args)
-        orders_container.append(Orders())
         logger.info(f"subscribe args: {args}")
         await self.subscribe(args, _callback)
         # await self.consume()
@@ -42,44 +43,41 @@ class WssOrderManagementService(WsPrivateAsync):
     @staticmethod
     def _prepare_args() -> List[Dict]:
         args = []
+        # 策略交易
         orders_sub1 = {
-            "channel": "orders",
+            "channel": "orders-algo",
             "instType": "ANY",
         }
         args.append(orders_sub1)
+        # 网格现货交易
+        orders_sub2 = {
+            "channel": "grid-orders-spot",
+            "instType": "ANY",
+        }
+        args.append(orders_sub2)
+        # 策略期货交易
+        orders_sub3 = {
+            "channel": "grid-orders-contract",
+            "instType": "ANY",
+        }
+        args.append(orders_sub3)
+        # 定投交易
+        orders_sub4 = {
+            "channel": "algo-recurring-buy",
+            "instType": "ANY",
+        }
+        args.append(orders_sub4)
         return args
 
 
 def _callback(message):
     logger.debug(message)
-    msgJson = json.loads(message)
-    if 'arg' not in msgJson:
-        return
-    arg = msgJson['arg']
-    if not arg or not arg['channel']:
-        return
-    if 'data' not in msgJson:
-        return
-    if not msgJson['data']:
-        return
-
-    if arg['channel'] == "orders":
-        on_orders_update(msgJson)
-
-    logger.debug(f"orders_container: {orders_container}")
-
-def on_orders_update(message):
-    if not orders_container:
-        orders_container.append(Orders.init_from_json(message))
-    else:
-        orders_container[0].update_from_json(message)
-    logger.info(orders_container)
 
 
 if __name__ == "__main__":
     # url = "wss://ws.okx.com:8443/ws/v5/private"
-    url = "wss://ws.okx.com:8443/ws/v5/private?brokerId=9999"
-    order_management_service = WssOrderManagementService(url=url)
+    url = "wss://wspap.okx.com:8443/ws/v5/business"
+    order_management_service = WssBusinessManagementService(url=url)
     asyncio.run(order_management_service.start())
     asyncio.run(order_management_service.run_service())
     time.sleep(30)

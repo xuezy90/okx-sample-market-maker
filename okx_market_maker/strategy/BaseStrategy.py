@@ -9,6 +9,7 @@ from copy import deepcopy
 from okx.Status import StatusAPI
 from okx_market_maker.market_data_service.model.Instrument import Instrument, InstState
 from okx_market_maker.market_data_service.model.Tickers import Tickers
+from okx_market_maker.order_management_service.WssBusinessManagementService import WssBusinessManagementService
 from okx_market_maker.position_management_service.model.Positions import Positions
 from okx_market_maker.strategy.params.ParamsLoader import ParamsLoader
 from okx_market_maker.utils.InstrumentUtil import InstrumentUtil
@@ -18,7 +19,7 @@ from okx.Trade import TradeAPI
 from okx.Account import AccountAPI
 from okx_market_maker.settings import *
 from okx_market_maker import orders_container, order_books, account_container, positions_container, tickers_container, \
-    mark_px_container, balance_and_position_container
+    mark_px_container, balance_and_position_container, wait_consume_second, instruments
 from okx_market_maker.strategy.model.StrategyOrder import StrategyOrder, StrategyOrderStatus
 from okx_market_maker.strategy.model.StrategyMeasurement import StrategyMeasurement
 from okx_market_maker.market_data_service.model.OrderBook import OrderBook
@@ -67,6 +68,9 @@ class BaseStrategy(ABC):
             else "wss://ws.okx.com:8443/ws/v5/private")
         self.pms = WssPositionManagementService(
             url="wss://wspap.okx.com:8443/ws/v5/private" if is_paper_trading
+            else "wss://ws.okx.com:8443/ws/v5/private")
+        self.bms = WssBusinessManagementService(
+            url="wss://wspap.okx.com:8443/ws/v5/business" if is_paper_trading
             else "wss://ws.okx.com:8443/ws/v5/private")
         self._strategy_order_dict = dict()
         self.params_loader = ParamsLoader()
@@ -280,6 +284,7 @@ class BaseStrategy(ABC):
     @staticmethod
     def get_account() -> Account:
         if not account_container:
+            logger.warning(f"account information not ready in accounts cache!")
             raise ValueError(f"account information not ready in accounts cache!")
         account: Account = account_container[0]
         return account
@@ -287,7 +292,9 @@ class BaseStrategy(ABC):
     @staticmethod
     def get_positions() -> Positions:
         if not positions_container:
-            raise ValueError(f"positions information not ready in accounts cache!")
+            logger.warning(f"positions information not ready in accounts cache!")
+            # todo raise ValueError
+            return Positions()
         positions: Positions = positions_container[0]
         return positions
 
@@ -339,30 +346,30 @@ class BaseStrategy(ABC):
             strategy_order = self._strategy_order_dict[client_order_id]
             if not exchange_order:
                 order_not_found_in_cache[client_order_id] = strategy_order
-
-            filled_size_from_update = Decimal(exchange_order.acc_fill_sz) - Decimal(strategy_order.filled_size)
-            side_flag = 1 if exchange_order.side == OrderSide.BUY else -1
-            self._strategy_measurement.net_filled_qty += filled_size_from_update * side_flag
-            self._strategy_measurement.trading_volume += filled_size_from_update
-            if side_flag == 1:
-                self._strategy_measurement.buy_filled_qty += filled_size_from_update
+                logger.info(
+                    f"order not found in cache,client_order_id={client_order_id},order_id={strategy_order.order_id},price={strategy_order.price},size={strategy_order.size}")
             else:
-                self._strategy_measurement.sell_filled_qty += filled_size_from_update
-            if exchange_order.state == OrderState.LIVE:
-                strategy_order.strategy_order_status = StrategyOrderStatus.LIVE
+                filled_size_from_update = Decimal(exchange_order.acc_fill_sz) - Decimal(strategy_order.filled_size)
+                side_flag = 1 if exchange_order.side == OrderSide.BUY else -1
+                self._strategy_measurement.net_filled_qty += filled_size_from_update * side_flag
+                self._strategy_measurement.trading_volume += filled_size_from_update
+                if side_flag == 1:
+                    self._strategy_measurement.buy_filled_qty += filled_size_from_update
+                else:
+                    self._strategy_measurement.sell_filled_qty += filled_size_from_update
+                if exchange_order.state == OrderState.LIVE:
+                    strategy_order.strategy_order_status = StrategyOrderStatus.LIVE
 
-            if exchange_order.state == OrderState.PARTIALLY_FILLED:
-                strategy_order.strategy_order_status = StrategyOrderStatus.PARTIALLY_FILLED
-                strategy_order.filled_size = exchange_order.acc_fill_sz
-                strategy_order.avg_fill_price = exchange_order.fill_px
+                if exchange_order.state == OrderState.PARTIALLY_FILLED:
+                    strategy_order.strategy_order_status = StrategyOrderStatus.PARTIALLY_FILLED
+                    strategy_order.filled_size = exchange_order.acc_fill_sz
+                    strategy_order.avg_fill_price = exchange_order.fill_px
 
-            if exchange_order.state == OrderState.CANCELED or exchange_order.state == OrderState.FILLED:
-                del self._strategy_order_dict[client_order_id]
-                order_to_remove_from_cache.append(exchange_order)
+                if exchange_order.state == OrderState.CANCELED or exchange_order.state == OrderState.FILLED:
+                    del self._strategy_order_dict[client_order_id]
+                    order_to_remove_from_cache.append(exchange_order)
 
         orders_cache.remove_orders(order_to_remove_from_cache)
-        if order_not_found_in_cache:
-            logger.warning(f"Strategy Orders not found in order cache: {order_not_found_in_cache}")
 
     def get_params(self):
         self.params_loader.load_params()
@@ -393,19 +400,18 @@ class BaseStrategy(ABC):
 
     async def _run_exchange_connection(self):
         self.rest_mds.start()
-        # await self.mds.run_service()
         await self.mds.run_service()
         await self.oms.run_service()
         await self.pms.run_service()
-        while not positions_container or len(positions_container) == 0:
-            await asyncio.sleep(5)
-            logger.info(f"account_container:{len(account_container)}")
-            logger.info(f"positions_container:{len(positions_container)}")
-            logger.info(f"balance_and_position_container:{len(balance_and_position_container)}")
-            logger.info(f"tickers_container:{len(tickers_container)}")
-            logger.info(f"mark_px_container:{len(mark_px_container)}")
-        else:
-            logger.info("All Infos Ready!")
+        await self.bms.run_service()
+        logger.info(f"account_container:{len(account_container)}")
+        logger.info(f"account_container:{len(account_container)}")
+        logger.info(f"positions_container:{len(positions_container)}")
+        logger.info(f"balance_and_position_container:{len(balance_and_position_container)}")
+        logger.info(f"tickers_container:{len(tickers_container)}")
+        logger.info(f"mark_px_container:{len(mark_px_container)}")
+        logger.info(f"order_books:{len(order_books)}")
+        logger.info(f"instruments:{len(instruments)}")
 
     def trading_instrument_type(self) -> InstType:
         guessed_inst_type = InstrumentUtil.get_inst_type_from_inst_id(TRADING_INSTRUMENT_ID)
@@ -440,17 +446,19 @@ class BaseStrategy(ABC):
                     raise ValueError("There is a ongoing maintenance in OKX.")
                 self.get_params()
                 result = self._health_check()
-                self.risk_summary()
                 if not result:
                     logger.info(f"Health Check result is {result}")
                     time.sleep(5)
                     continue
+                else:
+                    logger.info(f"Health Check result is {result}")
+                self.risk_summary()
                 # summary
                 self._update_strategy_order_status()
                 place_order_list, amend_order_list, cancel_order_list = self.order_operation_decision()
-                logger.info(place_order_list)
-                logger.info(amend_order_list)
-                logger.info(cancel_order_list)
+                logger.info(f"place_order_list:{place_order_list}")
+                logger.info(f"amend_order_list:{amend_order_list}")
+                logger.info(f"cancel_order_list:{cancel_order_list}")
 
                 self.place_orders(place_order_list)
                 self.amend_orders(amend_order_list)

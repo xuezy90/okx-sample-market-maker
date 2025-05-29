@@ -11,3 +11,6 @@ positions_container = []
 
 # oms
 orders_container = []
+
+# wait_consume_second
+wait_consume_second = 5

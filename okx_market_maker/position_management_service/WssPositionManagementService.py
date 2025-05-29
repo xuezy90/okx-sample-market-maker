@@ -10,7 +10,7 @@ from okx_market_maker.position_management_service.model.BalanceAndPosition impor
 from okx_market_maker.position_management_service.model.Account import Account, AccountDetail
 from okx_market_maker.position_management_service.model.Positions import Position, Positions
 from okx.websocket.WsPrivateAsync import WsPrivateAsync
-from okx_market_maker import balance_and_position_container, account_container, positions_container
+from okx_market_maker import balance_and_position_container, account_container, positions_container, wait_consume_second
 from okx_market_maker.settings import API_KEY, API_KEY_SECRET, API_PASSPHRASE
 from okx_market_maker.utils.LogFileEnum import LogFileEnum
 from okx_market_maker.utils.LogUtil import LogUtil
@@ -37,6 +37,7 @@ class WssPositionManagementService(WsPrivateAsync):
         await self.subscribe(args, _callback)
         # await self.consume()
         self.args += args
+        await asyncio.sleep(wait_consume_second)
 
     def stop_service(self):
         self.unsubscribe(self.args, lambda message: logger.info(message))
@@ -51,6 +52,7 @@ class WssPositionManagementService(WsPrivateAsync):
         args.append(account_sub)
         positions_sub = {
             "channel": "positions",
+            "instType": "ANY"
         }
         args.append(positions_sub)
         balance_and_position_sub = {
@@ -61,7 +63,7 @@ class WssPositionManagementService(WsPrivateAsync):
 
 
 def _callback(message):
-    logger.info(message)
+    logger.debug(message)
     msgJson = json.loads(message)
     if 'arg' not in msgJson:
         return
@@ -81,12 +83,13 @@ def _callback(message):
     if arg['channel'] == "positions":
         on_position(msgJson)
 
+
 def on_balance_and_position(message):
     if not balance_and_position_container:
         balance_and_position_container.append(BalanceAndPosition.init_from_json(message))
     else:
         balance_and_position_container[0].update_from_json(message)
-    logger.info(f"show balance_and_position_container:{balance_and_position_container}")
+    logger.debug(f"show balance_and_position_container:{balance_and_position_container}")
 
 
 def on_account(message):
@@ -94,7 +97,7 @@ def on_account(message):
         account_container.append(Account.init_from_json(message))
     else:
         account_container[0].update_from_json(message)
-    logger.info(f"show account_container:{account_container}")
+    logger.debug(f"show account_container:{account_container}")
 
 
 def on_position(message):
@@ -102,7 +105,7 @@ def on_position(message):
         positions_container.append(Positions.init_from_json(message))
     else:
         positions_container[0].update_from_json(message)
-    logger.info(f"show positions_container:{positions_container}")
+    logger.debug(f"show positions_container:{positions_container}")
 
 
 if __name__ == "__main__":

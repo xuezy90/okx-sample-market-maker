@@ -8,7 +8,12 @@ from okx_market_maker.position_management_service.model.Account import Account
 from okx_market_maker.market_data_service.model.Tickers import Tickers
 from okx_market_maker.market_data_service.model.MarkPx import MarkPxCache
 from okx_market_maker.utils.InstrumentUtil import InstrumentUtil
+from okx_market_maker.utils.LogFileEnum import LogFileEnum
+from okx_market_maker.utils.LogUtil import LogUtil
 from okx_market_maker.utils.OkxEnum import InstType, CtType
+
+# 创建logger
+logger = LogUtil(LogFileEnum.STRATEGY).get_logger()
 
 
 class RiskCalculator:
@@ -28,29 +33,35 @@ class RiskCalculator:
             risk_snapshot.asset_cash_snapshot[ccy] = cash
             if ccy not in RISK_FREE_CCY_LIST:
                 risk_snapshot.delta_usd_value += cash_usd_value
-        position_map = positions.get_position_map()
-        for pos_id, position in position_map.items():
-            inst_value_ccy, inst_value = cls.calc_instrument_asset_value(position)
-            inst_expo_ccy, inst_expo_value = cls.calc_instrument_delta(position)
-            risk_snapshot.asset_instrument_value_snapshot[
-                f"{position.inst_id}|{position.mgn_mode.value}|{position.pos_side.value}:{inst_value_ccy}"] = inst_value
-            risk_snapshot.mark_px_instrument_snapshot[inst_value.instrument.inst_id] = inst_value.mark_px
-            if inst_value_ccy not in risk_snapshot.price_to_usd_snapshot:
-                risk_snapshot.price_to_usd_snapshot[inst_value_ccy] = tickers.get_usdt_price_by_ccy(inst_value_ccy)
-            if inst_expo_ccy not in risk_snapshot.price_to_usd_snapshot:
-                usd_price = tickers.get_usdt_price_by_ccy(inst_expo_ccy) * usdt_to_usd_rate
-                risk_snapshot.price_to_usd_snapshot[inst_expo_ccy] = usd_price
+        if positions:
+            position_map = positions.get_position_map()
+            if len(position_map) == 0:
+                logger.warning(f"position map is empty:{position_map}")
             else:
-                usd_price = risk_snapshot.price_to_usd_snapshot[inst_expo_ccy]
-            risk_snapshot.delta_usd_value += inst_expo_value * usd_price
-            risk_snapshot.delta_instrument_snapshot[
-                f"{position.inst_id}|{position.mgn_mode.value}|{position.pos_side.value}:{inst_expo_ccy}"] = \
-                inst_expo_value
-            quote_ccy = position.inst_id.split("-")[1]
-            if quote_ccy not in risk_snapshot.price_to_usd_snapshot:
-                usd_price = tickers.get_usdt_price_by_ccy(quote_ccy) * usdt_to_usd_rate
-                risk_snapshot.price_to_usd_snapshot[inst_expo_ccy] = usd_price
-        risk_snapshot.timestamp = int(time.time() * 1000)
+                for pos_id, position in position_map.items():
+                    inst_value_ccy, inst_value = cls.calc_instrument_asset_value(position)
+                    inst_expo_ccy, inst_expo_value = cls.calc_instrument_delta(position)
+                    risk_snapshot.asset_instrument_value_snapshot[
+                        f"{position.inst_id}|{position.mgn_mode.value}|{position.pos_side.value}:{inst_value_ccy}"] = inst_value
+                    risk_snapshot.mark_px_instrument_snapshot[inst_value.instrument.inst_id] = inst_value.mark_px
+                    if inst_value_ccy not in risk_snapshot.price_to_usd_snapshot:
+                        risk_snapshot.price_to_usd_snapshot[inst_value_ccy] = tickers.get_usdt_price_by_ccy(
+                            inst_value_ccy)
+                    if inst_expo_ccy not in risk_snapshot.price_to_usd_snapshot:
+                        usd_price = tickers.get_usdt_price_by_ccy(inst_expo_ccy) * usdt_to_usd_rate
+                        risk_snapshot.price_to_usd_snapshot[inst_expo_ccy] = usd_price
+                    else:
+                        usd_price = risk_snapshot.price_to_usd_snapshot[inst_expo_ccy]
+                    risk_snapshot.delta_usd_value += inst_expo_value * usd_price
+                    risk_snapshot.delta_instrument_snapshot[
+                        f"{position.inst_id}|{position.mgn_mode.value}|{position.pos_side.value}:{inst_expo_ccy}"] = \
+                        inst_expo_value
+                    quote_ccy = position.inst_id.split("-")[1]
+                    if quote_ccy not in risk_snapshot.price_to_usd_snapshot:
+                        usd_price = tickers.get_usdt_price_by_ccy(quote_ccy) * usdt_to_usd_rate
+                        risk_snapshot.price_to_usd_snapshot[inst_expo_ccy] = usd_price
+        else:
+            risk_snapshot.timestamp = int(time.time() * 1000)
         return risk_snapshot
 
     @classmethod
@@ -102,4 +113,3 @@ class RiskCalculator:
             ccy_exposure = position.delta_bs
             return exposure_ccy, ccy_exposure
         return "USDT", 0
-

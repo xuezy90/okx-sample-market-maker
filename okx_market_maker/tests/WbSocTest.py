@@ -56,19 +56,19 @@ class WbSocEXP:
     @staticmethod
     def _prepare_args() -> List[Dict]:
         args = []
-        account_sub = {
-            "channel": "account"
-        }
-        args.append(account_sub)
+        # account_sub = {
+        #     "channel": "account"
+        # }
+        # args.append(account_sub)
         positions_sub = {
             "channel": "positions",
             "instType": "ANY"
         }
         args.append(positions_sub)
-        balance_and_position_sub = {
-            "channel": "balance_and_position"
-        }
-        args.append(balance_and_position_sub)
+        # balance_and_position_sub = {
+        #     "channel": "balance_and_position"
+        # }
+        # args.append(balance_and_position_sub)
         return args
 
     def process_message(self, data):
